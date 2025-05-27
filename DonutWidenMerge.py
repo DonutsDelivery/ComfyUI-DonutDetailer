@@ -9,6 +9,26 @@ from .merging_methods import MergingMethod
 from diffusers import UNet2DConditionModel
 
 
+# Simple wrapper so that bare nn.Modules can be passed to
+# ComfyUI's CheckpointSave node which expects a MODEL type
+# exposing a `.model` attribute and `get_model_object()` method.
+class _SimpleWrapper:
+    def __init__(self, unet=None, clip=None):
+        dummy = type("SimplePipeline", (), {})()
+        if unet is not None:
+            dummy.unet = unet
+            dummy.diffusion_model = unet
+        if clip is not None:
+            dummy.clip = clip
+            dummy.text_encoder = clip
+            dummy.text_encoder_1 = clip
+        self.model = dummy
+        self.clip = getattr(dummy, "clip", None)
+
+    def get_model_object(self):
+        return self.model
+
+
 # ─── HELPERS ────────────────────────────────────────────────────────────────────
 
 def _get_unet(wrapper):
@@ -168,8 +188,12 @@ class DonutWidenMergeUNet:
             torch.cuda.empty_cache()
             gc.collect()
 
-            # 10) **return the original wrapper** so CheckpointSave sees all its methods intact
-            return (orig_wrapper,)
+            # 10) return the wrapper. If the input was a bare UNet module,
+            # wrap it so the CheckpointSave node receives a compatible object.
+            if isinstance(orig_wrapper, UNet2DConditionModel):
+                return (_SimpleWrapper(unet=orig_wrapper),)
+            else:
+                return (orig_wrapper,)
 
         except Exception:
             print("\n[DonutWidenMergeUNet] *** Exception during merge ***")
@@ -238,8 +262,12 @@ class DonutWidenMergeCLIP:
             torch.cuda.empty_cache()
             gc.collect()
 
-            # return original wrapper so CheckpointSave can see .model / get_model_object()
-            return (orig_wrapper,)
+            # return the wrapper. If the input was a bare CLIP module, wrap it
+            # so the CheckpointSave node can use it.
+            if isinstance(orig_wrapper, nn.Module) and not hasattr(orig_wrapper, "model"):
+                return (_SimpleWrapper(clip=orig_wrapper),)
+            else:
+                return (orig_wrapper,)
 
         except Exception:
             print("\n[DonutWidenMergeCLIP] *** Exception during merge ***")
