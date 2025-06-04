@@ -95,6 +95,20 @@ class _SimpleWrapper:
                     return out["input_ids"] if isinstance(out, dict) else out
                 dummy.tokenize = _tok
 
+        # ---- INJECT encode_from_tokens_scheduled -----------------------------
+        if hasattr(real_pipe, "encode_from_tokens_scheduled") and callable(real_pipe.encode_from_tokens_scheduled):
+            dummy.encode_from_tokens_scheduled = real_pipe.encode_from_tokens_scheduled
+        else:
+            if hasattr(real_pipe, "get_text_features") and callable(real_pipe.get_text_features):
+                dummy.encode_from_tokens_scheduled = lambda tokens, **kw: real_pipe.get_text_features(tokens, **kw)
+            elif hasattr(real_pipe, "encode") and callable(real_pipe.encode):
+                dummy.encode_from_tokens_scheduled = lambda tokens, **kw: real_pipe.encode(tokens, **kw)
+            else:
+                def _no_encode(tokens, **kw):
+                    raise AttributeError(f"{type(self).__name__!r} wrapped object has no 'encode_from_tokens_scheduled' or fallback encode method.")
+                dummy.encode_from_tokens_scheduled = _no_encode
+        # ----------------------------------------------------------------------
+
         dummy.clone = lambda: _SimpleWrapper(pipeline=pipeline)
 
         self.model = dummy
